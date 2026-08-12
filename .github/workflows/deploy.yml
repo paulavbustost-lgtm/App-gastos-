@@ -1,8 +1,11 @@
 name: Deploy
 
+# GitHub Pages solo acepta publicaciones desde la rama por defecto del
+# repositorio, así que ambas están listadas: sirve tanto si la rama por defecto
+# sigue siendo la de trabajo como si se cambia a `main`.
 on:
   push:
-    branches: [main]
+    branches: [main, claude/expense-tracking-app-xecwxv]
   workflow_dispatch:
 
 permissions:
