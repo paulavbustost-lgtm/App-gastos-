@@ -23,8 +23,12 @@ async function loadPdfjs(): Promise<PdfModule> {
   if (!pdfjsPromise) {
     pdfjsPromise = (async () => {
       const pdfjs = await import('pdfjs-dist')
-      const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url')
-      pdfjs.GlobalWorkerOptions.workerSrc = worker.default
+      // El worker se arma desde su propio código como blob, en vez de apuntar a
+      // un archivo aparte: así la app funciona igual servida desde un archivo
+      // único, sin depender de rutas relativas.
+      const source = (await import('pdfjs-dist/build/pdf.worker.min.mjs?raw')).default
+      const blob = new Blob([source], { type: 'text/javascript' })
+      pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob)
       return pdfjs
     })()
   }

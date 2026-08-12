@@ -33,6 +33,10 @@ npm test         # tests unitarios
 npm run lint     # linter
 ```
 
+Además, `npm run build:single` genera **un solo archivo `.html`** con todo adentro (app, estilos y el
+lector de PDF), que se abre haciendo doble clic sin necesidad de servidor. Útil para pasarle la app a
+alguien por correo o guardarla en el escritorio.
+
 Requiere Node 20 o superior.
 
 ## Publicarla en internet
@@ -43,7 +47,8 @@ GitHub Actions**. Después queda en `https://<usuario>.github.io/<repo>/`, lista
 teléfono e instalar.
 
 El build usa rutas relativas (`base: './'`), así que también sirve desde cualquier hosting estático
-(Netlify, Vercel, Cloudflare Pages) subiendo la carpeta `dist/`.
+(Netlify, Vercel, Cloudflare Pages) subiendo la carpeta `dist/`. No hace falta ninguno de esos: la
+app no tiene servidor ni base de datos, son archivos estáticos y GitHub Pages alcanza de sobra.
 
 ## Importar la cartola
 
