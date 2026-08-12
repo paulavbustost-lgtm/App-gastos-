@@ -47,8 +47,18 @@ GitHub Actions**. Después queda en `https://<usuario>.github.io/<repo>/`, lista
 teléfono e instalar.
 
 El build usa rutas relativas (`base: './'`), así que también sirve desde cualquier hosting estático
-(Netlify, Vercel, Cloudflare Pages) subiendo la carpeta `dist/`. No hace falta ninguno de esos: la
-app no tiene servidor ni base de datos, son archivos estáticos y GitHub Pages alcanza de sobra.
+(Netlify, Vercel, Cloudflare Pages) subiendo la carpeta `dist/`.
+
+### Vercel
+
+El repo trae `vercel.json` con la configuración lista: framework Vite, `npm run build` y salida en
+`dist/`. Para publicar, en [vercel.com](https://vercel.com) → **Add New → Project** → importar este
+repositorio → **Deploy**. No hay que tocar ninguna opción, y cada push a la rama elegida vuelve a
+publicar solo.
+
+Los encabezados de `vercel.json` evitan un problema clásico de las apps instalables: si el navegador
+cachea `sw.js`, se queda pegado en una versión antigua **para siempre**, porque el service worker
+viejo sigue sirviendo los archivos viejos. Por eso ese archivo se marca como no cacheable.
 
 ## Importar la cartola
 
