@@ -6,6 +6,14 @@ import { parseBancoChileStatement } from '../lib/import/bancochile'
 import { markDuplicates } from '../lib/import/dedupe'
 import { PdfPasswordError, readPdfRows } from '../lib/import/pdf'
 import { learnRule, suggestCategory } from '../lib/import/rules'
+import { readSheet, UnsupportedFileError, type SheetRows } from '../lib/import/sheet'
+import {
+  buildCandidates,
+  columnLabels,
+  detectMapping,
+  isMappingUsable,
+  type ColumnMapping,
+} from '../lib/import/tabular'
 import type { CandidateKind, ImportCandidate, StatementMeta } from '../lib/import/types'
 import { Sheet } from './Sheet'
 import { IconAlert, IconCheck, IconUpload } from './Icons'
@@ -18,13 +26,13 @@ interface Props {
   onClose: () => void
 }
 
-type Stage = 'elegir' | 'clave' | 'leyendo' | 'revisar'
+type Stage = 'elegir' | 'clave' | 'leyendo' | 'mapear' | 'revisar'
 
 const KIND_LABEL: Record<CandidateKind, string> = {
   compra: 'Compra',
   cuota: 'Cuota',
   cargo: 'Cargo del banco',
-  pago: 'Pago a la tarjeta',
+  pago: 'Abono o pago',
 }
 
 export function ImportSheet({ categories, settings, existing, onImport, onClose }: Props) {
@@ -35,6 +43,11 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
   const [candidates, setCandidates] = useState<ImportCandidate[]>([])
   const [meta, setMeta] = useState<StatementMeta | null>(null)
   const [corrections, setCorrections] = useState<Record<string, string>>({})
+
+  const [rows, setRows] = useState<SheetRows>([])
+  const [mapping, setMapping] = useState<ColumnMapping | null>(null)
+  const [negativeMeans, setNegativeMeans] = useState<'ingreso' | 'gasto'>('ingreso')
+
   const fileRef = useRef<HTMLInputElement>(null)
   const bufferRef = useRef<ArrayBuffer | null>(null)
 
@@ -47,41 +60,86 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
     [categories],
   )
 
-  async function handleFile(file: File) {
-    bufferRef.current = await file.arrayBuffer()
-    void run('')
+  function categorize(list: ImportCandidate[]): ImportCandidate[] {
+    return list.map((c) => ({
+      ...c,
+      categoryId:
+        c.type === 'ingreso'
+          ? (categories.find((x) => x.id === 'reembolso')?.id ??
+            categories.find((x) => x.type === 'ingreso')?.id ??
+            '')
+          : suggestCategory(c.description, categories, settings.merchantRules),
+    }))
   }
 
-  async function run(pass: string) {
+  async function handleFile(file: File) {
+    setError(null)
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+
+    if (isPdf) {
+      bufferRef.current = await file.arrayBuffer()
+      void runPdf('')
+      return
+    }
+
+    setStage('leyendo')
+    try {
+      const parsed = await readSheet(file)
+      if (parsed.length === 0) {
+        setError('El archivo se abrió pero está vacío.')
+        setStage('elegir')
+        return
+      }
+      const detected = detectMapping(parsed)
+      setRows(parsed)
+      setMapping(detected)
+      if (isMappingUsable(detected)) {
+        applyMapping(parsed, detected, negativeMeans)
+      } else {
+        setStage('mapear')
+      }
+    } catch (err) {
+      setError(
+        err instanceof UnsupportedFileError
+          ? 'No reconocí ese archivo. Sirven Excel (.xlsx o .xls), CSV, o el PDF del estado de cuenta.'
+          : 'No pude leer el archivo.',
+      )
+      setStage('elegir')
+    }
+  }
+
+  function applyMapping(source: SheetRows, map: ColumnMapping, negative: 'ingreso' | 'gasto') {
+    const built = buildCandidates(source, map, { negativeMeans: negative })
+    if (built.length === 0) {
+      setError('Con esas columnas no salió ningún movimiento. Revisa cuál es la fecha y cuál el monto.')
+      setStage('mapear')
+      return
+    }
+    setCandidates(markDuplicates(categorize(built), existing))
+    setMeta(null)
+    setError(null)
+    setStage('revisar')
+  }
+
+  async function runPdf(pass: string) {
     const buffer = bufferRef.current
     if (!buffer) return
     setStage('leyendo')
     setError(null)
     try {
       // pdf.js consume el ArrayBuffer, así que se le pasa una copia por intento.
-      const rows = await readPdfRows(buffer.slice(0), pass)
-      const result = parseBancoChileStatement(rows)
+      const pdfRows = await readPdfRows(buffer.slice(0), pass)
+      const result = parseBancoChileStatement(pdfRows)
 
       if (result.candidates.length === 0) {
         setError(
-          'Pude abrir el PDF, pero no reconocí movimientos. ¿Es un estado de cuenta de tarjeta de crédito de Banco de Chile?',
+          'Pude abrir el PDF pero no reconocí movimientos. Si lo generaste convirtiendo un Excel, sube el Excel original: se lee mucho mejor.',
         )
         setStage('elegir')
         return
       }
 
-      const withCategories = result.candidates.map((c) => ({
-        ...c,
-        // Un pago a la tarjeta es un abono, no un gasto: le corresponden las
-        // categorías de ingreso.
-        categoryId:
-          c.type === 'ingreso'
-            ? (categories.find((x) => x.id === 'reembolso')?.id ??
-              categories.find((x) => x.type === 'ingreso')?.id ??
-              '')
-            : suggestCategory(c.description, categories, settings.merchantRules),
-      }))
-      setCandidates(markDuplicates(withCategories, existing))
+      setCandidates(markDuplicates(categorize(result.candidates), existing))
       setMeta(result.meta)
       setStage('revisar')
     } catch (err) {
@@ -102,9 +160,7 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
   function setCategory(key: string, categoryId: string) {
     setCandidates((list) => {
       const target = list.find((c) => c.key === key)
-      if (target) {
-        setCorrections((prev) => learnRule(prev, target.description, categoryId))
-      }
+      if (target) setCorrections((prev) => learnRule(prev, target.description, categoryId))
       return list.map((c) => (c.key === key ? { ...c, categoryId } : c))
     })
   }
@@ -116,28 +172,19 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
   const selected = candidates.filter((c) => c.selected)
   const total = selected.reduce((s, c) => s + (c.type === 'gasto' ? c.amount : 0), 0)
   const duplicates = candidates.filter((c) => c.duplicate).length
+  const labels = useMemo(() => (mapping ? columnLabels(rows, mapping) : []), [rows, mapping])
 
-  function confirm() {
-    onImport(
-      selected.map((c) => ({
-        type: c.type,
-        amount: c.amount,
-        categoryId: c.categoryId,
-        date: c.date,
-        note: c.description,
-        method: c.method,
-      })),
-      corrections,
-    )
+  function updateMapping(patch: Partial<ColumnMapping>) {
+    setMapping((m) => (m ? { ...m, ...patch } : m))
   }
 
   return (
-    <Sheet title="Importar cartola" onClose={onClose}>
+    <Sheet title="Importar movimientos" onClose={onClose}>
       {stage === 'elegir' && (
         <>
           <p className="card__sub">
-            Sube el estado de cuenta de tu tarjeta de crédito de Banco de Chile en PDF. Se lee dentro de tu
-            navegador: <strong>el archivo no se sube a ningún servidor</strong>.
+            Sube el <strong>Excel o CSV</strong> que descargas del banco, o el <strong>PDF</strong> del
+            estado de cuenta. Se lee dentro de tu navegador: el archivo no se sube a ningún servidor.
           </p>
           {error && (
             <p className="badge badge--critical" role="alert">
@@ -147,12 +194,12 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
           )}
           <button className="btn btn--primary btn--block" onClick={() => fileRef.current?.click()}>
             <IconUpload />
-            Elegir PDF
+            Elegir archivo
           </button>
           <input
             ref={fileRef}
             type="file"
-            accept="application/pdf,.pdf"
+            accept=".pdf,.xlsx,.xls,.csv,.txt,application/pdf,text/csv"
             className="visually-hidden"
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -161,8 +208,9 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
             }}
           />
           <p className="row__hint">
-            ¿Dónde encontrarlo? En el sitio del banco: Productos → Tarjeta de Crédito → Consultar →
-            Movimientos Facturados.
+            En el sitio del banco: Productos → Tarjeta de Crédito → Consultar → Movimientos. Si te ofrece
+            descargar en Excel, prefiérelo antes que el PDF. <strong>No lo conviertas a PDF</strong>: al
+            convertirlo se pierde la estructura de columnas y ya no se puede leer.
           </p>
         </>
       )}
@@ -185,20 +233,91 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
               autoComplete="off"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && password && void run(password)}
+              onKeyDown={(e) => e.key === 'Enter' && password && void runPdf(password)}
             />
           </div>
           <button
             className="btn btn--primary btn--block"
             disabled={!password}
-            onClick={() => void run(password)}
+            onClick={() => void runPdf(password)}
           >
-            Abrir cartola
+            Abrir archivo
           </button>
         </>
       )}
 
-      {stage === 'leyendo' && <p className="card__sub">Leyendo la cartola…</p>}
+      {stage === 'leyendo' && <p className="card__sub">Leyendo el archivo…</p>}
+
+      {stage === 'mapear' && mapping && (
+        <>
+          <p className="card__sub">
+            Dime qué hay en cada columna y armo los movimientos. Encontré {rows.length} filas.
+          </p>
+          {error && (
+            <p className="badge badge--critical" role="alert">
+              <IconAlert />
+              {error}
+            </p>
+          )}
+
+          {(
+            [
+              ['date', 'Fecha', true],
+              ['description', 'Descripción', false],
+              ['amount', 'Monto', true],
+              ['credit', 'Abonos (si están aparte)', false],
+            ] as const
+          ).map(([role, label, required]) => (
+            <div className="field" key={role}>
+              <label className="field__label" htmlFor={`col-${role}`}>
+                {label}
+                {required && ' *'}
+              </label>
+              <select
+                id={`col-${role}`}
+                className="select"
+                value={mapping[role]}
+                onChange={(e) => updateMapping({ [role]: Number(e.target.value) })}
+              >
+                <option value={-1}>— ninguna —</option>
+                {labels.map((name, i) => (
+                  <option key={i} value={i}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+
+          <div className="field">
+            <span className="field__label">Los montos negativos son…</span>
+            <div className="segmented" role="group" aria-label="Significado de los montos negativos">
+              <button
+                className="segmented__opt"
+                aria-pressed={negativeMeans === 'ingreso'}
+                onClick={() => setNegativeMeans('ingreso')}
+              >
+                Abonos
+              </button>
+              <button
+                className="segmented__opt"
+                aria-pressed={negativeMeans === 'gasto'}
+                onClick={() => setNegativeMeans('gasto')}
+              >
+                Gastos
+              </button>
+            </div>
+          </div>
+
+          <button
+            className="btn btn--primary btn--block"
+            disabled={!isMappingUsable(mapping)}
+            onClick={() => applyMapping(rows, mapping, negativeMeans)}
+          >
+            Ver movimientos
+          </button>
+        </>
+      )}
 
       {stage === 'revisar' && (
         <>
@@ -227,9 +346,15 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
             </button>
           </div>
 
+          {rows.length > 0 && mapping && (
+            <button className="btn btn--ghost btn--block" onClick={() => setStage('mapear')}>
+              Cambiar las columnas
+            </button>
+          )}
+
           <p className="row__hint">
-            Revisa las categorías antes de importar: lo que corrijas queda aprendido para la próxima vez. Los
-            pagos a la tarjeta y lo que ya tenías registrado vienen desmarcados.
+            Revisa las categorías antes de importar: lo que corrijas queda aprendido para la próxima vez.
+            Los abonos y lo que ya tenías registrado vienen desmarcados.
           </p>
 
           <ul className="tx-list">
@@ -270,7 +395,23 @@ export function ImportSheet({ categories, settings, existing, onImport, onClose 
             ))}
           </ul>
 
-          <button className="btn btn--primary btn--block" disabled={selected.length === 0} onClick={confirm}>
+          <button
+            className="btn btn--primary btn--block"
+            disabled={selected.length === 0}
+            onClick={() =>
+              onImport(
+                selected.map((c) => ({
+                  type: c.type,
+                  amount: c.amount,
+                  categoryId: c.categoryId,
+                  date: c.date,
+                  note: c.description,
+                  method: c.method,
+                })),
+                corrections,
+              )
+            }
+          >
             <IconCheck />
             Importar {selected.length} movimientos
           </button>

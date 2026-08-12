@@ -10,8 +10,8 @@ ni sincronización.
 ## Qué hace
 
 - **Registro rápido**: monto, categoría, detalle, fecha y medio de pago. Gastos e ingresos.
-- **Importar la cartola** de tarjeta de crédito de Banco de Chile en PDF: lee los movimientos, los
-  categoriza solo, entiende las compras en cuotas y no duplica lo que ya estaba.
+- **Importar los movimientos del banco** desde Excel, CSV o el PDF del estado de cuenta: los lee,
+  los categoriza solo, entiende las compras en cuotas y no duplica lo que ya estaba.
 - **Períodos con día de corte**: mes calendario, o desde el día que te pagan (ej: del 25 al 24).
 - **Presupuesto** por período y topes por categoría, con **alertas** al llegar al 80% del tope y al
   pasarse, tanto en el resumen como en el momento de anotar el gasto.
@@ -60,12 +60,34 @@ Los encabezados de `vercel.json` evitan un problema clásico de las apps instala
 cachea `sw.js`, se queda pegado en una versión antigua **para siempre**, porque el service worker
 viejo sigue sirviendo los archivos viejos. Por eso ese archivo se marca como no cacheable.
 
-## Importar la cartola
+## Importar movimientos
 
-En **Ajustes → Importar cartola** subes el estado de cuenta en PDF de tu tarjeta de crédito de Banco
-de Chile (en el sitio del banco: Productos → Tarjeta de Crédito → Consultar → Movimientos
-Facturados). El PDF se lee **dentro del navegador con pdf.js**: no se sube a ningún servidor. Si el
-archivo pide clave, la app la solicita y la usa solo para abrirlo en memoria; nunca se guarda.
+En **Ajustes → Importar cartola** se sube lo que el banco entregue. Todo se lee **dentro del
+navegador**: ningún archivo se sube a un servidor.
+
+| Formato | Cómo se lee |
+|---|---|
+| `.xlsx` | ZIP con XML: se descomprime con `fflate` y se leen los textos compartidos y la primera hoja |
+| `.xls` que en realidad es HTML | varios bancos exportan una tabla HTML con extensión `.xls`; se lee la tabla más grande |
+| `.csv` / `.txt` | separador detectado solo (`;` `,` tab `\|`), con comillas y BOM |
+| `.pdf` | estado de cuenta de tarjeta de Banco de Chile, vía pdf.js |
+
+El tipo se detecta **por el contenido, no por la extensión**, porque la extensión miente seguido. El
+texto se decodifica como UTF-8 y, si el archivo no lo cumple, se relee como Latin-1 — así los
+acentos no se rompen.
+
+**Conviene el Excel antes que el PDF**, y sobre todo **no hay que convertir el Excel a PDF**: al
+convertirlo se pierde la estructura de columnas y queda ilegible para el importador.
+
+En planillas, las columnas se detectan solas por encabezado (`Fecha`, `Detalle`, `Cargo`, `Abono`…)
+y, si no hay encabezados, por contenido: la columna con más fechas es la fecha, la que tiene más
+montos es el monto, la de texto más largo es la descripción. Si la detección falla, la app pide
+elegir las columnas a mano. Como el signo de los montos no significa lo mismo en todos los bancos,
+hay un interruptor para decir si los negativos son abonos o gastos.
+
+### El PDF del estado de cuenta
+
+Si el archivo pide clave, la app la solicita y la usa solo para abrirlo en memoria; nunca se guarda.
 
 Qué hace con lo que encuentra:
 
@@ -113,7 +135,8 @@ src/
   lib/        date.ts (períodos y día de corte), stats.ts (agregaciones),
               alerts.ts (estado de los topes), format.ts (moneda y montos),
               storage.ts (localStorage), csv.ts, draft.ts
-  lib/import/ pdf.ts (lectura con pdf.js), bancochile.ts (mapeo de columnas),
+  lib/import/ sheet.ts (xlsx/xls-HTML/csv), tabular.ts (detección de columnas),
+              pdf.ts (lectura con pdf.js), bancochile.ts (mapeo del estado de cuenta),
               text.ts (fechas, montos y limpieza de comercios),
               rules.ts (categorización), dedupe.ts
   hooks/      useStore.ts (estado + persistencia), useTheme.ts
@@ -152,8 +175,10 @@ inversión automática de los claros.
 - No hay conexión en vivo con el banco. La cartola se importa a mano, mes a mes. (Chile aún no tiene
   open banking: el Sistema de Finanzas Abiertas de la Ley Fintec entra en vigencia recién en julio
   de 2027.)
-- El importador solo entiende el estado de cuenta de tarjeta de crédito de Banco de Chile, y depende
-  del diseño actual del PDF: si el banco lo cambia, hay que ajustar el mapeo de columnas.
+- Las planillas (Excel/CSV) funcionan con cualquier banco, eligiendo las columnas a mano si hace
+  falta. El lector de **PDF** en cambio solo entiende el estado de cuenta de tarjeta de crédito de
+  Banco de Chile y depende del diseño actual del archivo: si el banco lo cambia, hay que ajustar el
+  mapeo de columnas en `src/lib/import/bancochile.ts`.
 - Una cartola de tarjeta no trae tus ingresos. El sueldo se anota a mano.
 - No hay gastos recurrentes automáticos.
 - Un solo perfil por dispositivo, sin gastos compartidos entre personas.

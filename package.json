@@ -15,6 +15,7 @@
     "build:artifact": "npm run build:single && node scripts/make-artifact.mjs"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "pdfjs-dist": "^6.2.108",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
