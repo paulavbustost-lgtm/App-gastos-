@@ -10,9 +10,11 @@ ni sincronización.
 ## Qué hace
 
 - **Registro rápido**: monto, categoría, detalle, fecha y medio de pago. Gastos e ingresos.
+- **Importar la cartola** de tarjeta de crédito de Banco de Chile en PDF: lee los movimientos, los
+  categoriza solo, entiende las compras en cuotas y no duplica lo que ya estaba.
 - **Períodos con día de corte**: mes calendario, o desde el día que te pagan (ej: del 25 al 24).
-- **Presupuesto** por período y topes por categoría, con aviso cuando vas gastando muy rápido para
-  lo que queda del mes.
+- **Presupuesto** por período y topes por categoría, con **alertas** al llegar al 80% del tope y al
+  pasarse, tanto en el resumen como en el momento de anotar el gasto.
 - **Análisis**: gasto por período (últimos 6), desglose por categoría, promedio diario, proyección
   al cierre y reparto por medio de pago.
 - **Buscador y filtros** por texto, tipo y categoría, sobre el período o todo el historial.
@@ -43,6 +45,50 @@ teléfono e instalar.
 El build usa rutas relativas (`base: './'`), así que también sirve desde cualquier hosting estático
 (Netlify, Vercel, Cloudflare Pages) subiendo la carpeta `dist/`.
 
+## Importar la cartola
+
+En **Ajustes → Importar cartola** subes el estado de cuenta en PDF de tu tarjeta de crédito de Banco
+de Chile (en el sitio del banco: Productos → Tarjeta de Crédito → Consultar → Movimientos
+Facturados). El PDF se lee **dentro del navegador con pdf.js**: no se sube a ningún servidor. Si el
+archivo pide clave, la app la solicita y la usa solo para abrirlo en memoria; nunca se guarda.
+
+Qué hace con lo que encuentra:
+
+- **Reconstruye las filas por posición** en la página y las mapea a las columnas del estado de cuenta
+  (lugar, fecha, descripción, monto operación, monto total, n° de cuota, cargo del mes).
+- **Limpia el comercio**: saca el código de referencia y los prefijos de pasarela, de modo que
+  `MERCADOPAGO*ALMACEN` quede como `Almacén` y `PAYU *UBER TRIP` como `Uber Trip`.
+- **Categoriza** con una tabla de comercios chilenos, y **aprende de tus correcciones**: lo que
+  cambies a mano queda guardado y se aplica en las siguientes importaciones.
+- **Compras en cuotas**: usa la cuota del mes (no el total de la compra) y la fecha del estado de
+  cuenta, así el gasto cae en el período en que efectivamente se cobró y no se repite cada mes.
+- **Pagos a la tarjeta**: los muestra pero llegan desmarcados, porque no son un gasto nuevo — la
+  compra original ya está contada.
+- **Duplicados**: lo que ya tenías registrado se marca y llega desmarcado, así puedes importar la
+  misma cartola dos veces sin ensuciar los datos.
+
+Nada se importa sin que lo confirmes: la app muestra la lista completa para revisar y corregir
+categorías antes de guardar.
+
+Solo está implementado el formato de Banco de Chile. Otro banco necesita su propio mapeo de
+columnas en `src/lib/import/`.
+
+## Alertas de presupuesto
+
+Los topes por categoría se definen en **Ajustes → Topes por categoría**. A partir de ahí:
+
+| Estado | Cuándo |
+|---|---|
+| Al día | vas dentro de lo esperado |
+| Vas rápido | gastas más rápido de lo que avanza el período (más de 15 puntos por delante) |
+| Te queda poco | llegaste al 80% del tope |
+| Pasaste el tope | te pasaste del 100% |
+
+Aparecen en el resumen ordenadas por urgencia, y salta un aviso en el momento justo en que un gasto
+cruza un umbral — al anotarlo a mano o al importar una cartola. El aviso se evalúa contra el período
+al que pertenece el gasto, no contra el que estés mirando en pantalla, y no se repite mientras la
+categoría siga en el mismo estado.
+
 ## Cómo está armada
 
 Sin backend ni dependencias de UI: React + TypeScript sobre Vite, y CSS propio.
@@ -50,21 +96,31 @@ Sin backend ni dependencias de UI: React + TypeScript sobre Vite, y CSS propio.
 ```
 src/
   lib/        date.ts (períodos y día de corte), stats.ts (agregaciones),
-              format.ts (moneda y parseo de montos), storage.ts (localStorage),
-              csv.ts, draft.ts
+              alerts.ts (estado de los topes), format.ts (moneda y montos),
+              storage.ts (localStorage), csv.ts, draft.ts
+  lib/import/ pdf.ts (lectura con pdf.js), bancochile.ts (mapeo de columnas),
+              text.ts (fechas, montos y limpieza de comercios),
+              rules.ts (categorización), dedupe.ts
   hooks/      useStore.ts (estado + persistencia), useTheme.ts
-  components/ formulario, lista, medidor de presupuesto, gráficos, hoja modal
+  components/ formulario, lista, medidor y alertas de presupuesto, gráficos,
+              hoja modal, importador
   views/      Resumen, Movimientos, Análisis, Ajustes
 public/       manifest, service worker e íconos
 scripts/      make-icons.mjs — genera los PNG del ícono (npm run icons)
 ```
+
+pdf.js se carga solo cuando abres el importador (`import()` dinámico), así el arranque de la app no
+carga el megabyte del lector para quien nunca importa una cartola.
 
 El estado vive en `localStorage` bajo `app-gastos:state`, versionado y normalizado al leerlo, así un
 archivo corrupto o antiguo no rompe la app. Las pestañas abiertas del mismo navegador se mantienen
 sincronizadas.
 
 Los tests cubren la parte con reglas de verdad: aritmética de períodos con día de corte, parseo de
-montos escritos a mano (`12.500`, `1.234,56`, `$ 9.990`) y las agregaciones.
+montos escritos a mano (`12.500`, `1.234,56`, `$ 9.990`), las agregaciones, el mapeo de columnas de
+la cartola, la limpieza de nombres de comercio, la categorización, la detección de duplicados y los
+umbrales de las alertas. Los casos del importador usan cartolas sintéticas: reproducen las
+posiciones de columna del formato, no datos de nadie.
 
 ### Colores de los gráficos
 
@@ -78,5 +134,11 @@ inversión automática de los claros.
 
 - Los datos viven en el navegador del dispositivo. Si borras los datos del sitio o cambias de
   teléfono, se pierden: usa **Ajustes → Respaldo**.
-- No hay gastos recurrentes automáticos ni conexión con el banco; todo se anota a mano.
+- No hay conexión en vivo con el banco. La cartola se importa a mano, mes a mes. (Chile aún no tiene
+  open banking: el Sistema de Finanzas Abiertas de la Ley Fintec entra en vigencia recién en julio
+  de 2027.)
+- El importador solo entiende el estado de cuenta de tarjeta de crédito de Banco de Chile, y depende
+  del diseño actual del PDF: si el banco lo cambia, hay que ajustar el mapeo de columnas.
+- Una cartola de tarjeta no trae tus ingresos. El sueldo se anota a mano.
+- No hay gastos recurrentes automáticos.
 - Un solo perfil por dispositivo, sin gastos compartidos entre personas.

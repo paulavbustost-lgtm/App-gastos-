@@ -774,6 +774,79 @@ h3 {
   color: var(--good-text);
 }
 
+/* Alertas de presupuesto por categoría ------------------------ */
+
+.alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.alert {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.alert__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alert__name {
+  font-size: 0.9rem;
+  font-weight: 570;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert__track {
+  height: 10px;
+}
+
+.alert__detail {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Revisión previa a importar una cartola --------------------- */
+
+.import-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 14px;
+}
+
+.import-row__check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.import-row__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.import-row__cat {
+  margin-top: 6px;
+  padding: 6px 26px 6px 8px;
+  font-size: 0.8rem;
+  background-position: right 6px center;
+  background-size: 15px;
+}
+
 /* ============================================================
    Formularios
    ============================================================ */

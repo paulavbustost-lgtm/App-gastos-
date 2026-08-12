@@ -37,6 +37,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'ropa', name: 'Ropa', emoji: '👕', colorSlot: 7, type: 'gasto', builtin: true },
   { id: 'educacion', name: 'Educación', emoji: '📚', colorSlot: 0, type: 'gasto', builtin: true },
   { id: 'mascotas', name: 'Mascotas', emoji: '🐾', colorSlot: 2, type: 'gasto', builtin: true },
+  { id: 'banco', name: 'Banco y comisiones', emoji: '🏦', colorSlot: 7, type: 'gasto', builtin: true },
   { id: 'otros', name: 'Otros', emoji: '📦', colorSlot: 6, type: 'gasto', builtin: true },
 
   { id: 'sueldo', name: 'Sueldo', emoji: '💼', colorSlot: 5, type: 'ingreso', builtin: true },
