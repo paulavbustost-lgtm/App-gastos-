@@ -3,8 +3,10 @@ import { formatMoney } from '../lib/format'
 import { periodProgress, type PeriodRange } from '../lib/date'
 import { averagePerDay, byCategory, projectedSpend, totals } from '../lib/stats'
 import { BudgetMeter } from '../components/BudgetMeter'
+import { BudgetAlerts } from '../components/BudgetAlerts'
 import { CategoryBars } from '../components/CategoryBars'
 import { TransactionList } from '../components/TransactionList'
+import type { CategoryBudgetStatus } from '../lib/alerts'
 
 interface Props {
   periodTx: Transaction[]
@@ -12,8 +14,10 @@ interface Props {
   settings: Settings
   range: PeriodRange
   isDark: boolean
+  budgetStatuses: CategoryBudgetStatus[]
   onSelectTx: (tx: Transaction) => void
   onGoToBudget: () => void
+  onEditCategoryBudgets: () => void
   onGoToMovimientos: () => void
 }
 
@@ -23,8 +27,10 @@ export function ResumenView({
   settings,
   range,
   isDark,
+  budgetStatuses,
   onSelectTx,
   onGoToBudget,
+  onEditCategoryBudgets,
   onGoToMovimientos,
 }: Props) {
   const { locale, currency } = settings
@@ -91,6 +97,13 @@ export function ResumenView({
           </button>
         </div>
       )}
+
+      <BudgetAlerts
+        statuses={budgetStatuses}
+        locale={locale}
+        currency={currency}
+        onEditBudgets={onEditCategoryBudgets}
+      />
 
       <div className="card">
         <div className="card__head">

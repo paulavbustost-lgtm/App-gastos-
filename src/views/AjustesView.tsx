@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
-import type { AppState, Category, Settings, ThemePref } from '../types'
+import type { AppState, Category, Settings, ThemePref, Transaction } from '../types'
 import { CURRENCY_OPTIONS } from '../data/currencies'
 import { formatMoney, parseAmount } from '../lib/format'
 import { download, toCSV } from '../lib/csv'
 import { normalizeState } from '../lib/storage'
 import { todayISO } from '../lib/date'
 import { CategoriesSheet } from '../components/CategoriesSheet'
+import { ImportSheet } from '../components/ImportSheet'
 import { Sheet } from '../components/Sheet'
 import { IconDownload, IconUpload } from '../components/Icons'
 
@@ -13,13 +14,20 @@ interface Props {
   state: AppState
   isDark: boolean
   budgetFocus: boolean
+  /** Abre directo el editor de topes por categoría (viene de una alerta). */
+  categoryBudgetFocus: boolean
   onBudgetFocusHandled: () => void
+  onCategoryBudgetFocusHandled: () => void
   onUpdateSettings: (patch: Partial<Settings>) => void
   onAddCategory: (cat: Omit<Category, 'id'>) => void
   onUpdateCategory: (id: string, patch: Partial<Category>) => void
   onRemoveCategory: (id: string) => void
   onReplaceState: (next: AppState) => void
   onClearTransactions: () => void
+  onImportTransactions: (
+    rows: Omit<Transaction, 'id' | 'createdAt'>[],
+    learned: Record<string, string>,
+  ) => void
   notify: (message: string) => void
 }
 
@@ -27,18 +35,22 @@ export function AjustesView({
   state,
   isDark,
   budgetFocus,
+  categoryBudgetFocus,
   onBudgetFocusHandled,
+  onCategoryBudgetFocusHandled,
   onUpdateSettings,
   onAddCategory,
   onUpdateCategory,
   onRemoveCategory,
   onReplaceState,
   onClearTransactions,
+  onImportTransactions,
   notify,
 }: Props) {
   const { settings, transactions, categories } = state
   const [showCategories, setShowCategories] = useState(false)
-  const [showBudgets, setShowBudgets] = useState(budgetFocus)
+  const [showImport, setShowImport] = useState(false)
+  const [showBudgets, setShowBudgets] = useState(categoryBudgetFocus)
   const [budgetInput, setBudgetInput] = useState(settings.monthlyBudget ? String(settings.monthlyBudget) : '')
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -175,6 +187,21 @@ export function AjustesView({
         </button>
       </div>
 
+      <span className="section-label">Importar</span>
+      <div className="card">
+        <div className="card__head">
+          <span className="card__title">Cartola de tarjeta de crédito</span>
+        </div>
+        <p className="card__sub" style={{ marginTop: 0 }}>
+          Sube el estado de cuenta en PDF de tu tarjeta de Banco de Chile y la app carga los movimientos
+          sola, ya categorizados. El archivo se lee en tu teléfono; no se sube a ningún servidor.
+        </p>
+        <button className="btn btn--primary btn--block" style={{ marginTop: 12 }} onClick={() => setShowImport(true)}>
+          <IconUpload />
+          Importar cartola
+        </button>
+      </div>
+
       <span className="section-label">Tus datos</span>
       <div className="card">
         <p className="card__sub" style={{ marginTop: 0 }}>
@@ -225,6 +252,21 @@ export function AjustesView({
         </button>
       </div>
 
+      {showImport && (
+        <ImportSheet
+          categories={categories}
+          settings={settings}
+          existing={transactions}
+          onImport={(rows, learned) => {
+            // El aviso lo da App: puede tener que reemplazarlo por una alerta
+            // de presupuesto si la importación hizo saltar algún tope.
+            onImportTransactions(rows, learned)
+            setShowImport(false)
+          }}
+          onClose={() => setShowImport(false)}
+        />
+      )}
+
       {showCategories && (
         <CategoriesSheet
           categories={categories}
@@ -237,10 +279,16 @@ export function AjustesView({
       )}
 
       {showBudgets && (
-        <Sheet title="Topes por categoría" onClose={() => setShowBudgets(false)}>
+        <Sheet
+          title="Topes por categoría"
+          onClose={() => {
+            setShowBudgets(false)
+            onCategoryBudgetFocusHandled()
+          }}
+        >
           <p className="card__sub">
-            Define cuánto quieres gastar como máximo en cada categoría. Aparece bajo cada barra en el
-            resumen.
+            Define cuánto quieres gastar como máximo en cada categoría. En el resumen te aviso cuando
+            llegues al 80% del tope, y otra vez si te pasas.
           </p>
           <div className="rows">
             {categories

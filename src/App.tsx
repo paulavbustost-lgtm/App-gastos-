@@ -3,8 +3,9 @@ import type { Transaction } from './types'
 import { useStore } from './hooks/useStore'
 import { useTheme } from './hooks/useTheme'
 import { currencySymbol } from './data/currencies'
-import { currentPeriodKey, periodRange, type PeriodKey } from './lib/date'
+import { currentPeriodKey, periodKeyForDate, periodRange, type PeriodKey } from './lib/date'
 import { filterByPeriod } from './lib/stats'
+import { categoryBudgetStatuses, newlyTriggered } from './lib/alerts'
 import { PeriodPicker } from './components/PeriodPicker'
 import { draftFrom, emptyDraft, type TransactionDraft } from './lib/draft'
 import { TransactionSheet } from './components/TransactionSheet'
@@ -34,6 +35,7 @@ export default function App() {
   const [draft, setDraft] = useState<TransactionDraft | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [budgetFocus, setBudgetFocus] = useState(false)
+  const [categoryBudgetFocus, setCategoryBudgetFocus] = useState(false)
 
   // Cambiar el día de corte redefine los períodos: hay que reanclar el actual.
   useEffect(() => {
@@ -48,6 +50,10 @@ export default function App() {
 
   const range = useMemo(() => periodRange(period, settings.cutDay), [period, settings.cutDay])
   const periodTx = useMemo(() => filterByPeriod(transactions, range), [transactions, range])
+  const budgetStatuses = useMemo(
+    () => categoryBudgetStatuses(periodTx, categories, settings, range),
+    [periodTx, categories, settings, range],
+  )
   const symbol = useMemo(
     () => currencySymbol(settings.locale, settings.currency),
     [settings.locale, settings.currency],
@@ -61,6 +67,37 @@ export default function App() {
     setDraft(draftFrom(tx))
   }
 
+  /**
+   * Avisa si lo recién anotado hizo que alguna categoría llegara a su tope.
+   * Se evalúa contra el período al que pertenece cada movimiento nuevo, no
+   * contra el que se está mirando: si anotas un gasto de hoy mientras revisas
+   * un mes viejo, el aviso igual corresponde.
+   * Devuelve `true` si hubo aviso, para no pisarlo con el mensaje normal.
+   */
+  function warnIfBudgetTripped(nextTransactions: Transaction[], touchedDates: string[]): boolean {
+    const keys = [...new Set(touchedDates.map((d) => periodKeyForDate(d, settings.cutDay)))]
+    const fired = keys.flatMap((key) => {
+      const r = periodRange(key, settings.cutDay)
+      return newlyTriggered(
+        categoryBudgetStatuses(transactions, categories, settings, r),
+        categoryBudgetStatuses(nextTransactions, categories, settings, r),
+      )
+    })
+    if (fired.length === 0) return false
+
+    if (fired.length === 1) {
+      const s = fired[0]
+      setToast(
+        s.level === 'excedido'
+          ? `${s.category.emoji} ${s.category.name}: pasaste el tope`
+          : `${s.category.emoji} ${s.category.name}: te queda poco del tope`,
+      )
+    } else {
+      setToast(`${fired.length} categorías llegaron a su tope`)
+    }
+    return true
+  }
+
   function save(d: TransactionDraft, amount: number) {
     const payload = {
       type: d.type,
@@ -70,12 +107,19 @@ export default function App() {
       note: d.note.trim(),
       method: d.method,
     }
+
+    let next: Transaction[]
     if (d.id) {
-      store.updateTransaction(d.id, payload)
-      setToast('Movimiento actualizado')
+      const id = d.id
+      next = transactions.map((t) => (t.id === id ? { ...t, ...payload } : t))
+      store.updateTransaction(id, payload)
     } else {
+      next = [{ ...payload, id: 'nuevo', createdAt: Date.now() }, ...transactions]
       store.addTransaction(payload)
-      setToast('Movimiento agregado')
+    }
+
+    if (!warnIfBudgetTripped(next, [payload.date])) {
+      setToast(d.id ? 'Movimiento actualizado' : 'Movimiento agregado')
     }
     setDraft(null)
   }
@@ -111,9 +155,14 @@ export default function App() {
             settings={settings}
             range={range}
             isDark={isDark}
+            budgetStatuses={budgetStatuses}
             onSelectTx={openEdit}
             onGoToBudget={() => {
               setBudgetFocus(true)
+              setTab('ajustes')
+            }}
+            onEditCategoryBudgets={() => {
+              setCategoryBudgetFocus(true)
               setTab('ajustes')
             }}
             onGoToMovimientos={() => setTab('movimientos')}
@@ -149,13 +198,24 @@ export default function App() {
             state={state}
             isDark={isDark}
             budgetFocus={budgetFocus}
+            categoryBudgetFocus={categoryBudgetFocus}
             onBudgetFocusHandled={() => setBudgetFocus(false)}
+            onCategoryBudgetFocusHandled={() => setCategoryBudgetFocus(false)}
             onUpdateSettings={store.updateSettings}
             onAddCategory={store.addCategory}
             onUpdateCategory={store.updateCategory}
             onRemoveCategory={store.removeCategory}
             onReplaceState={store.replaceState}
             onClearTransactions={store.clearTransactions}
+            onImportTransactions={(rows, learned) => {
+              store.addTransactions(rows, learned)
+              const next = [
+                ...rows.map((r, i) => ({ ...r, id: `import-${i}`, createdAt: Date.now() })),
+                ...transactions,
+              ]
+              if (!warnIfBudgetTripped(next, rows.map((r) => r.date)))
+                setToast(`Importados ${rows.length} movimientos`)
+            }}
             notify={setToast}
           />
         )}

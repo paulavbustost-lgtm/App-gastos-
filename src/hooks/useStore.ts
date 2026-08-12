@@ -6,6 +6,7 @@ import { loadState, saveState } from '../lib/storage'
 export interface Store {
   state: AppState
   addTransaction: (tx: Omit<Transaction, 'id' | 'createdAt'>) => void
+  addTransactions: (rows: Omit<Transaction, 'id' | 'createdAt'>[], learned: Record<string, string>) => void
   updateTransaction: (id: string, patch: Partial<Transaction>) => void
   removeTransaction: (id: string) => void
   addCategory: (cat: Omit<Category, 'id'>) => void
@@ -38,6 +39,28 @@ export function useStore(): Store {
       transactions: [{ ...tx, amount: Math.abs(tx.amount), id: uid(), createdAt: Date.now() }, ...s.transactions],
     }))
   }, [])
+
+  /** Alta masiva desde una importación, junto con las reglas aprendidas. */
+  const addTransactions = useCallback(
+    (rows: Omit<Transaction, 'id' | 'createdAt'>[], learned: Record<string, string>) => {
+      if (rows.length === 0) return
+      const now = Date.now()
+      setState((s) => ({
+        ...s,
+        transactions: [
+          ...rows.map((tx, i) => ({
+            ...tx,
+            amount: Math.abs(tx.amount),
+            id: uid(),
+            createdAt: now - i,
+          })),
+          ...s.transactions,
+        ],
+        settings: { ...s.settings, merchantRules: { ...s.settings.merchantRules, ...learned } },
+      }))
+    },
+    [],
+  )
 
   const updateTransaction = useCallback((id: string, patch: Partial<Transaction>) => {
     setState((s) => ({
@@ -93,6 +116,7 @@ export function useStore(): Store {
     () => ({
       state,
       addTransaction,
+      addTransactions,
       updateTransaction,
       removeTransaction,
       addCategory,
@@ -105,6 +129,7 @@ export function useStore(): Store {
     [
       state,
       addTransaction,
+      addTransactions,
       updateTransaction,
       removeTransaction,
       addCategory,

@@ -39,6 +39,11 @@ export interface Settings {
   theme: ThemePref
   /** Día de corte del período (1-28). 1 = mes calendario. */
   cutDay: number
+  /**
+   * Comercio normalizado → categoría, aprendido de las correcciones hechas al
+   * importar cartolas. Hace que la siguiente importación llegue mejor.
+   */
+  merchantRules: Record<string, string>
 }
 
 export interface AppState {

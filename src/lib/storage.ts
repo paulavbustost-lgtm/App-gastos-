@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS: Settings = {
   categoryBudgets: {},
   theme: 'system',
   cutDay: 1,
+  merchantRules: {},
 }
 
 export function emptyState(): AppState {
@@ -19,7 +20,7 @@ export function emptyState(): AppState {
     version: STATE_VERSION,
     transactions: [],
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
-    settings: { ...DEFAULT_SETTINGS, categoryBudgets: {} },
+    settings: { ...DEFAULT_SETTINGS, categoryBudgets: {}, merchantRules: {} },
   }
 }
 
@@ -68,6 +69,14 @@ export function normalizeState(raw: unknown): AppState {
         : {},
     theme: s.theme === 'light' || s.theme === 'dark' ? s.theme : 'system',
     cutDay: clampCutDay(numberOr(s.cutDay, 1)),
+    merchantRules:
+      s.merchantRules && typeof s.merchantRules === 'object'
+        ? Object.fromEntries(
+            Object.entries(s.merchantRules).filter(
+              ([k, v]) => typeof k === 'string' && typeof v === 'string' && k && v,
+            ),
+          )
+        : {},
   }
 
   return { version: STATE_VERSION, transactions, categories, settings }
